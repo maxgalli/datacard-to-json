@@ -11,6 +11,22 @@ def json_str(obj: Any) -> str:
     return json.dumps(obj, sort_keys=True, indent=4)
 
 
+def restructure_shapes(shape_lines: list) -> list:
+    shape_dict_list = []
+    identifiers = [
+        "type", "process", "channel", "file", "histogram", "histogram_with_systematics"
+    ]
+    for shape_line in shape_lines:
+        line_dict = {}
+        for id, word in zip(identifiers, shape_line.split()):
+            line_dict[id] = word
+        
+        shape_dict_list.append(line_dict)
+    
+    log.debug("shapes dict: \n{}".format(json_str(shape_dict_list)))
+    return shape_dict_list
+
+
 def restructure_observations(observations: list) -> list:
     """build list of dictionaries with observed yields"""
     obs_dict_list = []
@@ -18,7 +34,7 @@ def restructure_observations(observations: list) -> list:
     for i_ch, channel in enumerate(observations[0].split()[1:]):
         obs = float(observations[1].split()[1:][i_ch])  # could use int for data
         obs_dict_list.append({"data": [obs], "name": channel})
-    log.debug(f"\nobs dict:\n{json_str(obs_dict_list)}\n")
+    log.debug(f"\nobs dict (after restructuring observations):\n{json_str(obs_dict_list)}\n")
     return obs_dict_list
 
 
@@ -101,8 +117,12 @@ def restructure_modifiers(
                 modifier_dict[channel_name][sample_name].append(
                     {"name": syst_name, "type": "staterror", "data": [abs_stat_unc]}
                 )
+            elif syst_type == "shape":
+                modifier_dict[channel_name][sample_name].append(
+                    {"name": syst_name, "type": "shaperror", "data": norm_effect}
+                )
             else:
-                raise NotImplementedError
+                raise NotImplementedError(f"syst_type {syst_type} not supported")
     log.debug(f"\nmodifier dict:\n{json_str(modifier_dict)}\n")
     return modifier_dict
 
@@ -127,11 +147,22 @@ def get_sections_dict(datacard: list) -> dict:
         if line == datacard[-1]:
             # append last section
             sections_list.append(current_section)
+
     sections_dict = {}
     # find "general" section with imax etc.
     # seems to be first usually
     # not clear yet that this is needed
     sections_dict.update({"general": sections_list.pop(0)})
+
+    # root files for shapes analyses
+    try:
+        idx = next(
+            i for i, s in enumerate(sections_list) if any([l.startswith("shapes") for l in s])
+        )
+        sections_dict.update({"shapes": sections_list.pop(idx)})
+    except StopIteration:
+        pass
+
     # data yields, identified by "observation"
     idx = next(
         i
@@ -144,13 +175,25 @@ def get_sections_dict(datacard: list) -> dict:
         i for i, s in enumerate(sections_list) if any(["rate" in l[0:4] for l in s])
     )
     sections_dict.update({"channels": sections_list.pop(idx)})
-    # systematics, last in list (need better identifier)
-    sections_dict.update({"modifiers": sections_list.pop(-1)})
+    
+    # UPDATED: systematics, last in list (need better identifier)
+    # in the shapes configuration, last lines can be of format:
+    # <something> autoMCStats <many something>
+    # we exclude them and try to understand what they do later on
+    modifiers = []
+    for i, line in enumerate(sections_list[-1]):
+        if not "autoMCStats" in line:
+            modifiers.append(sections_list[-1].pop(i))
+    sections_dict.update({"modifiers": modifiers})
 
     # full list of channels and samples from datacard (including duplications)
     channel_names = sections_dict["channels"][0].split()[1:]
     channel_yields = [float(y) for y in sections_dict["channels"][3].split()[1:]]
     sample_names = sections_dict["channels"][1].split()[1:]
+
+    # restructure shapes
+    if "shapes" in sections_dict:
+        sections_dict["shapes"] = restructure_shapes(sections_dict["shapes"])
 
     # convert observations into dict
     sections_dict["observations"] = restructure_observations(
@@ -165,6 +208,9 @@ def get_sections_dict(datacard: list) -> dict:
     sections_dict["modifiers"] = restructure_modifiers(
         sections_dict["modifiers"], channel_names, channel_yields, sample_names
     )
+
+    log.debug("sections_dict = {}".format(sections_dict))
+
     return sections_dict
 
 
@@ -183,12 +229,19 @@ def sections_dict_to_workspace(sections_dict: dict) -> dict:
                 sample["modifiers"].append(
                     {"data": None, "name": "r", "type": "normfactor"}
                 )
+            # time to add shapes, if shapes analysis
+            if "shapes" in sections_dict:
+                for shape_dict in sections_dict["shapes"]:
+                    if shape_dict["channel"] == channel["name"]:
+                        if shape_dict["process"] in ["*", sample["name"]]:
+                            sample["shape"] = "{}/{}".format(shape_dict["file"], shape_dict["histogram"])
     ws.update({"channels": sections_dict["channels"]})
     ws.update(
         {"measurements": [{"config": {"parameters": [], "poi": "r"}, "name": "meas"}]}
     )
     ws.update({"observations": sections_dict["observations"]})
     ws.update({"version": "1.0.0"})
+
     return ws
 
 
@@ -201,7 +254,7 @@ def datacard_to_json(datacard: list) -> dict:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
-
+    
     with open(sys.argv[-1]) as f:
         datacard = f.readlines()
 

@@ -45,16 +45,24 @@ def restructure_channels(samples: list) -> list:
     # loop over channels
     channel_names = samples[0].split()[1:]
     sample_names = samples[1].split()[1:]
+    samples_numbers = samples[2].split()[1:]
     yields = [float(y) for y in samples[3].split()[1:]]
     # loop over channels
     for ch in sorted(set(channel_names)):
         # get indices of current channel
         ch_idx = [i for i, c in enumerate(channel_names) if c == ch]
         sample_dict_list = []
-        for i_sam, sample in enumerate([sample_names[i] for i in ch_idx]):
+        for i_sam, (sample, sample_num) in enumerate(zip(
+            [sample_names[i] for i in ch_idx], 
+            [samples_numbers[i] for i in ch_idx])
+            ):
             # include a placeholder for sample modifiers
             sample_dict_list.append(
-                {"name": sample, "data": [yields[ch_idx[i_sam]]], "modifiers": []}
+                {
+                    "name": sample,
+                    "id": sample_num, 
+                    "data": [yields[ch_idx[i_sam]]], 
+                    "modifiers": []}
             )
         ch_dict_list.append({"name": ch, "samples": sample_dict_list})
     log.debug(f"\nch dict:\n{json_str(ch_dict_list)}\n")
@@ -104,25 +112,46 @@ def restructure_modifiers(
                 f" - norm effect {norm_effect} for {sample_name} in {channel_name}"
             )
             if syst_type == "lnN":
-                modifier_dict[channel_name][sample_name].append(
-                    {
-                        "name": syst_name,
-                        "type": "normsys",
-                        "data": {"hi": norm_effect, "lo": 1 / norm_effect},
-                    }
-                )
+                if isinstance(norm_effect, float):
+                    modifier_dict[channel_name][sample_name].append(
+                        {
+                            "name": syst_name,
+                            "type": "normsys",
+                            "data": {"hi": norm_effect, "lo": 1 / norm_effect},
+                        }
+                    )
+                elif isinstance(norm_effect, str):
+                    lo, hi = norm_effect.split("/")
+                    modifier_dict[channel_name][sample_name].append(
+                        {
+                            "name": syst_name,
+                            "type": "normsys",
+                            "data": {"hi": float(hi), "lo": float(lo)},
+                        }
+                    )
+            elif syst_type == "lnU":
+                # don't know exactly how this should be treated;
+                # have it like this for now, then we'll see
+                    modifier_dict[channel_name][sample_name].append(
+                        {
+                            "name": syst_name,
+                            "type": "normsys - lnU",
+                            "data": {"hi": norm_effect, "lo": 1 / norm_effect},
+                        }
+                    )               
             elif syst_type == "gmN":
                 # this needs access to channel yields to calculate absolute stat. unc.
                 abs_stat_unc = norm_effect * channel_yields[i]
                 modifier_dict[channel_name][sample_name].append(
                     {"name": syst_name, "type": "staterror", "data": [abs_stat_unc]}
                 )
-            elif syst_type == "shape":
+            elif syst_type == "shape" or syst_type == "shape?": # still have to understand what exactly shape? means
+                # see chat with ACM for meaning of shape?
                 modifier_dict[channel_name][sample_name].append(
                     {"name": syst_name, "type": "shaperror", "data": norm_effect}
                 )
             else:
-                raise NotImplementedError(f"syst_type {syst_type} not supported")
+                raise NotImplementedError("syst_type {} not supported".format(syst_type))
     log.debug(f"\nmodifier dict:\n{json_str(modifier_dict)}\n")
     return modifier_dict
 
@@ -179,17 +208,23 @@ def get_sections_dict(datacard: list) -> dict:
     # UPDATED: systematics, last in list (need better identifier)
     # in the shapes configuration, last lines can be of format:
     # <something> autoMCStats <many something>
+    # <something> rateParam <many something>
     # we exclude them and try to understand what they do later on
     modifiers = []
+    unsupported_modifiers = ["autoMCStats", "rateParam", "param"]
     for i, line in enumerate(sections_list[-1]):
-        if not "autoMCStats" in line:
+        if any(unsupported_modifier in line for unsupported_modifier in unsupported_modifiers):
+            break
+        else:
             modifiers.append(sections_list[-1].pop(i))
     sections_dict.update({"modifiers": modifiers})
+
 
     # full list of channels and samples from datacard (including duplications)
     channel_names = sections_dict["channels"][0].split()[1:]
     channel_yields = [float(y) for y in sections_dict["channels"][3].split()[1:]]
     sample_names = sections_dict["channels"][1].split()[1:]
+    sample_numbers = sections_dict["channels"][2].split()[1:]
 
     # restructure shapes
     if "shapes" in sections_dict:
@@ -224,10 +259,13 @@ def sections_dict_to_workspace(sections_dict: dict) -> dict:
             sample["modifiers"] = sections_dict["modifiers"][channel["name"]][
                 sample["name"]
             ]
-            if i == 0:
+            # attach normfactor for signals
+            # signals are identified by an id < 0
+            idn = int(sample["id"])
+            if idn <= 0:
                 # this should be signal, attach normfactor
                 sample["modifiers"].append(
-                    {"data": None, "name": "r", "type": "normfactor"}
+                    {"data": None, "name": "r_{}".format(sample["name"]), "type": "normfactor"}
                 )
             # time to add shapes, if shapes analysis
             if "shapes" in sections_dict:

@@ -61,7 +61,7 @@ def restructure_shapes(shape_lines: list, channels: list, samples: list, systema
                         "sample": sample,
                         "channel": channel,
                         "file": shape_line["file"],
-                        "histogram": "{}/{}".format(channel, shape_line["histogram"].replace("$MASS", mass).replace("$PROCESS", sample))
+                        "histogram": shape_line["histogram"].replace("$CHANNEL", channel).replace("$MASS", mass).replace("$PROCESS", sample)
                     }
                 )
 
@@ -78,11 +78,11 @@ def restructure_shapes(shape_lines: list, channels: list, samples: list, systema
                                 "channel": channel,
                                 "file": shape_line["file"],
                                 "modifier": sys,
-                                "histogram_up": "{}/{}Up".format(channel, 
-                                shape_line["histogram_with_systematics"].replace("$MASS", mass).replace("$PROCESS", sample).replace("$SYSTEMATIC", sys)
+                                "histogram_up": "{}Up".format( 
+                                shape_line["histogram_with_systematics"].replace("$CHANNEL", channel).replace("$MASS", mass).replace("$PROCESS", sample).replace("$SYSTEMATIC", sys)
                                     ),
-                                "histogram_down": "{}/{}Down".format(channel, 
-                                shape_line["histogram_with_systematics"].replace("$MASS", mass).replace("$PROCESS", sample).replace("$SYSTEMATIC", sys)
+                                "histogram_down": "{}Down".format( 
+                                shape_line["histogram_with_systematics"].replace("$CHANNEL", channel).replace("$MASS", mass).replace("$PROCESS", sample).replace("$SYSTEMATIC", sys)
                                     ),
                             }
                         )                      
@@ -98,11 +98,11 @@ def restructure_observations(observations: list, shapes_list: list) -> list:
     # not clear how multi-bin channels are specified here
     for i_ch, channel in enumerate(observations[0].split()[1:]):
         obs = float(observations[1].split()[1:][i_ch])  # could use int for data
-        dct = {"data": [obs], "name": channel}
+        dct = {"name": channel}
         for shape_dict in shapes_list:
             if shape_dict["sample"] == "data_obs" and shape_dict["channel"] == channel and "modifier" not in shape_dict:
                 log.debug("Found it!") 
-                dct["shape"] = extract_histogram(shape_dict["file"], shape_dict["histogram"])
+                dct["data"] = extract_histogram(shape_dict["file"], shape_dict["histogram"])
         obs_dict_list.append(dct)
     #log.debug(f"\nobs dict (after restructuring observations):\n{json_str(obs_dict_list)}\n")
     return obs_dict_list
@@ -339,12 +339,8 @@ def get_sections_dict(datacard: list) -> dict:
 def extract_histogram(file: str, histo: str) -> dict:
     #log.debug("Extracting {} from {}".format(histo, file))
     f = uproot.open(file)
-    shape = {}
     histo = f[histo]
-    shape["values"] = list(histo.values())
-    shape["edges"] = list(histo.axis().edges())
-
-    return shape
+    return list(histo.values())
 
 
 def sections_dict_to_workspace(sections_dict: dict) -> dict:
@@ -371,7 +367,7 @@ def sections_dict_to_workspace(sections_dict: dict) -> dict:
                 for shape_dict in sections_dict["shapes"]:
                     if "modifier" not in shape_dict and shape_dict["sample"] == sample["name"] \
                         and shape_dict["channel"] == channel["name"]:
-                        sample["shape"] = extract_histogram(shape_dict["file"], shape_dict["histogram"])
+                        sample["data"] = extract_histogram(shape_dict["file"], shape_dict["histogram"])
                         break
 
     ws.update({"channels": sections_dict["channels"]})

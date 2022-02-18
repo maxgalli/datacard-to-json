@@ -57,7 +57,7 @@ def restructure_shapes(
         else:
             l_processes = [shape_line["process"]]
         l_processes = list(set(l_processes))
-        log.debug("l_processes = {}".format(l_processes))
+        # log.debug("l_processes = {}".format(l_processes))
         if shape_line["bin"] == "*":
             # remove bins that are already in other lines
             others = []
@@ -134,12 +134,12 @@ def restructure_observations(observations: list, shapes_list: list) -> list:
                 and shape_dict["bin"] == bin
                 and "modifier" not in shape_dict
             ):
-                log.debug("Found it!")
+                # log.debug("Found it!")
                 dct["data"] = f"{shape_dict['file']}:{shape_dict['histogram']}"
         obs_dict_list.append(dct)
-    log.debug(
-        f"\nobs dict (after restructuring observations):\n{json_str(obs_dict_list)}\n"
-    )
+    # log.debug(
+    #    f"\nobs dict (after restructuring observations):\n{json_str(obs_dict_list)}\n"
+    # )
     return obs_dict_list
 
 
@@ -152,7 +152,7 @@ def restructure_bins(processes: list) -> list:
     process_names = processes[1].split()[1:]
     processes_numbers = processes[2].split()[1:]
     yields = [float(y) for y in processes[3].split()[1:]]
-    log.debug("yields: {}".format(yields))
+    # log.debug("yields: {}".format(yields))
     # loop over bins
     for ch in sorted(set(bin_names)):
         # get indices of current bin
@@ -176,7 +176,7 @@ def restructure_bins(processes: list) -> list:
                 }
             )
         ch_dict_list.append({"name": ch, "processes": process_dict_list})
-    # log.debug(f"\nch dict:\n{json_str(ch_dict_list)}\n")
+    #log.debug(f"\nch dict:\n{json_str(ch_dict_list)}\n")
     return ch_dict_list
 
 
@@ -338,7 +338,7 @@ def get_sections_dict(datacard: list, mass: str) -> dict:
         if any(["observation" in l[0:11] for l in s])
     )
     sections_dict.update({"observations": sections_list.pop(idx)})
-    log.debug(f"observations: {sections_dict['observations']}")
+    # log.debug(f"observations: {sections_dict['observations']}")
     # process yields, identified by "rate"
     idx = next(
         i for i, s in enumerate(sections_list) if any(["rate" in l[0:4] for l in s])
@@ -352,6 +352,7 @@ def get_sections_dict(datacard: list, mass: str) -> dict:
     # we exclude them and try to understand what they do later on
     modifiers = []
     unsupported_modifiers = ["autoMCStats", "rateParam", "param"]
+    # log.debug(f"sections_list: {sections_list}")
     for line in sections_list[-1]:
         if any(
             unsupported_modifier in line
@@ -369,7 +370,7 @@ def get_sections_dict(datacard: list, mass: str) -> dict:
     process_names = sections_dict["bins"][1].split()[1:]
     process_numbers = sections_dict["bins"][2].split()[1:]
     modifier_names = [line.split()[0] for line in sections_dict["modifiers"]]
-    log.debug("Modifiers: {}".format(modifier_names))
+    # log.debug("Modifiers: {}".format(modifier_names))
 
     # restructure shapes
     if "shapes" in sections_dict:
@@ -397,6 +398,7 @@ def get_sections_dict(datacard: list, mass: str) -> dict:
         process_numbers,
         sections_dict["shapes"],
     )
+    log.debug("modifiers restructured")
 
     # log.debug("sections_dict = {}".format(sections_dict))
 
